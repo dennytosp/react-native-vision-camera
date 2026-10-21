@@ -34,11 +34,19 @@ internal object PermissionRequestDispatcher {
       if (continuation != null && continuation.isActive) {
         continuation.resume(grantResults)
       }
-      // This never returns `true`. `true` tells React Native to drop the listener again, and resuming
-      // the continuation above may already have let the next queued request register this very listener
-      // - dropping it afterwards would swallow that request's result and bring the hang back. A shared
-      // listener is never "done" anyway: it stays valid for every future request, ignores request codes
-      // it does not know, and is replaced as usual once other code registers a listener of its own.
+      // This never returns `true`. React Native keeps a single listener slot
+      // (`ReactActivityDelegate.mPermissionListener`) and nulls it whenever a listener returns `true`, so
+      // `true` means "you may drop me". React Native's own `PermissionsModule` is built the same way this
+      // object is - it implements `PermissionListener` once and keeps per-request state in a `SparseArray`
+      // keyed by request code - and it reports itself droppable only once its own bucket is empty, never
+      // unconditionally.
+      //
+      // We do not report droppable at all. `Promise.async { ... }` runs callers on `Dispatchers.Default`,
+      // while this listener is invoked on the main thread, so the next queued request can register this
+      // very listener from another thread while the main thread is still deciding whether to drop it -
+      // and `mPermissionListener` is a plain, non-volatile field written from both. Staying registered is
+      // free: this is a process-wide singleton that captures no Activity, it ignores request codes it does
+      // not know, and every new request re-registers it anyway.
       return@PermissionListener false
     }
 
